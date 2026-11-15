@@ -2,331 +2,1016 @@ const FormData = require('form-data');
 const axios = require('axios');
 const fs = require('fs');
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 class UnityChatSessionsManager {
     constructor() {
         this.sessions = {};
-
     }
 
     add(unityChatSession) {
-        const client = this.sessions[unityChatSession.sessionName];
-        if (!client) {
-            this.sessions[unityChatSession.sessionName] = unityChatSession;
+        if (!unityChatSession || (!unityChatSession.sessionName && !unityChatSession.uuid)) {
+            throw new Error('Sessão inválida: objeto precisa possuir a propriedade "sessionName" ou "uuid".');
         }
+        const key = unityChatSession.sessionName || unityChatSession.uuid;
+        const client = this.sessions[key];
+        if (!client) {
+            this.sessions[key] = unityChatSession;
+            if (unityChatSession.uuid && unityChatSession.sessionName) {
+                this.sessions[unityChatSession.uuid] = unityChatSession;
+            }
+            return true;
+        }
+        return false;
     }
 
-    get(sessionName) {
-        return this.sessions[sessionName];
+    get(identifier) {
+        return this.sessions[identifier] || null;
     }
 
     getAll() {
-        return this.sessions;
+        return { ...this.sessions };
     }
 
-    remove(sessionName) {
-        delete this.sessions[sessionName];
+    remove(identifier) {
+        if (this.sessions[identifier]) {
+            const session = this.sessions[identifier];
+            delete this.sessions[identifier];
+            if (session.sessionName && this.sessions[session.sessionName]) {
+                delete this.sessions[session.sessionName];
+            }
+            if (session.uuid && this.sessions[session.uuid]) {
+                delete this.sessions[session.uuid];
+            }
+            return true;
+        }
+        return false;
     }
 }
 
 class UnityChatService {
-    constructor(apiKey, apiVersion = 1) {
-        this.apiKey = apiKey;
-        this.apiVersion = apiVersion;
-        this.token = null;
-        this.sessions = [];
+    constructor(apiKeyOrOptions, apiVersion = 1, options = {}) {
+        let opts = options;
+        if (typeof apiKeyOrOptions === 'object' && apiKeyOrOptions !== null) {
+            opts = { ...apiKeyOrOptions, ...options };
+            this.apiKey = opts.apiKey || null;
+            this.token = opts.token || null;
+            this.apiVersion = opts.apiVersion || apiVersion || 1;
+        } else {
+            if (apiKeyOrOptions === '' || (typeof apiKeyOrOptions === 'string' && !apiKeyOrOptions.trim())) {
+                throw new Error('API Key não pode ser vazia.');
+            }
+            this.apiKey = apiKeyOrOptions || null;
+            this.token = opts.token || null;
+            this.apiVersion = apiVersion || 1;
+        }
+
+        this.timeout = opts.timeout || 30000;
+        this.baseURL = (opts.baseURL || opts.baseUrl || `https://api.unitychat.areum.com.br/api/v${this.apiVersion}`).replace(/\/$/, '');
+        this.user = opts.user || null;
+
+        // URLs mantidas para compatibilidade retroativa
         this.urls = {
-            authentication: `https://api.unitychat.areum.com.br/api/v${apiVersion}/authentication/api-keys`,
-            revokeAuthentication: `https://api.unitychat.areum.com.br/api/v${apiVersion}/authentication/api-keys/revoke`,
-            unityChatStatus: `https://api.unitychat.areum.com.br/api/v${apiVersion}/services/unitychat/status`,
-            getSessions: `https://api.unitychat.areum.com.br/api/v${apiVersion}/accounts/services/sessions`,
+            authentication: `${this.baseURL}/authentication/api-keys`,
+            revokeAuthentication: `${this.baseURL}/authentication/api-keys/revoke`,
+            unityChatStatus: `${this.baseURL}/whatsapp/management/status`,
+            getSessions: `${this.baseURL}/accounts/services/sessions`,
+        };
+
+        this._initSubmodules();
+    }
+
+    _getHeaders(extraHeaders = {}) {
+        const headers = { ...extraHeaders };
+        if (this.token) {
+            headers.Authorization = `Bearer ${this.token}`;
+        }
+        return headers;
+    }
+
+    async _request(method, endpoint, { data, params, headers, ...config } = {}) {
+        const url = endpoint.startsWith('http') ? endpoint : `${this.baseURL}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+        return axios({
+            method,
+            url,
+            data,
+            params,
+            headers: this._getHeaders(headers),
+            timeout: this.timeout,
+            ...config
+        });
+    }
+
+    // ==========================================
+    // 3. MÓDULO: AUTENTICAÇÃO & REGISTRO
+    // ==========================================
+
+    async authenticate(apiKey) {
+        const key = apiKey || this.apiKey;
+        if (!key) {
+            throw new Error('API Key é obrigatória para autenticar.');
+        }
+        try {
+            const { data } = await axios.post(
+                this.urls.authentication,
+                { apiKey: key },
+                { timeout: this.timeout }
+            );
+            this.token = data?.token || null;
+            return data;
+        } catch (e) {
+            console.error('[UnityChatService] Falha na autenticação via API Key:', e.response?.data || e.message);
+            return null;
         }
     }
 
-    async authenticate() {
+    async login({ username, password }) {
         try {
-            const { data } = await axios.post(this.urls.authentication, { apiKey: this.apiKey });
-            this.token = data.token;
+            const { data } = await this._request('post', '/authentication/users', {
+                data: { username, password }
+            });
+            if (data?.token) {
+                this.token = data.token;
+            }
+            if (data?.user) {
+                this.user = data.user;
+            }
             return data;
         } catch (e) {
-            console.error(e);
+            console.error('[UnityChatService] Falha no login:', e.response?.data || e.message);
+            return null;
+        }
+    }
+
+    async getMe() {
+        try {
+            const { data } = await this._request('get', '/authentication/me');
+            this.user = data;
+            return data;
+        } catch (e) {
+            console.error('[UnityChatService] Falha ao consultar perfil /me:', e.response?.data || e.message);
+            return null;
+        }
+    }
+
+    async forgotPassword(email) {
+        try {
+            const { data } = await this._request('post', '/authentication/forgot-password', {
+                data: { email }
+            });
+            return data;
+        } catch (e) {
+            console.error('[UnityChatService] Falha na solicitação de recuperação de senha:', e.response?.data || e.message);
+            return null;
+        }
+    }
+
+    async resetPassword({ token, newPassword, password }) {
+        try {
+            const { data } = await this._request('post', '/authentication/reset-password', {
+                data: { token, newPassword: newPassword || password }
+            });
+            return data;
+        } catch (e) {
+            console.error('[UnityChatService] Falha na redefinição de senha:', e.response?.data || e.message);
+            return null;
+        }
+    }
+
+    async register(accountData) {
+        try {
+            const { data } = await this._request('post', '/register', {
+                data: accountData
+            });
+            return data;
+        } catch (e) {
+            console.error('[UnityChatService] Falha no registro de nova conta:', e.response?.data || e.message);
+            return null;
+        }
+    }
+
+    async activateAccount(token) {
+        try {
+            const { data } = await this._request('post', '/register/account-activation', {
+                data: { token }
+            });
+            return data;
+        } catch (e) {
+            console.error('[UnityChatService] Falha na ativação da conta:', e.response?.data || e.message);
+            return null;
+        }
+    }
+
+    async logout() {
+        try {
+            const { data } = await this._request('post', '/authentication/logout');
+            this.token = null;
+            this.user = null;
+            return data;
+        } catch (e) {
+            console.error('[UnityChatService] Falha no logout:', e.response?.data || e.message);
             return null;
         }
     }
 
     async revoke() {
         try {
-            const { data } = await axios.post(this.urls.revokeAuthentication, { apiKey: this.apiKey }, {
-                headers: {
-                    Authorization: `Bearer ${this.token}`
+            const { data } = await axios.post(
+                this.urls.revokeAuthentication,
+                { apiKey: this.apiKey },
+                {
+                    headers: this._getHeaders(),
+                    timeout: this.timeout
                 }
-            });
+            );
             this.token = null;
             return data;
         } catch (e) {
-            console.error(e);
+            console.error('[UnityChatService] Falha ao revogar credencial:', e.response?.data || e.message);
             return null;
         }
     }
 
+    // ==========================================
+    // SESSÕES & GERENCIAMENTO
+    // ==========================================
+
     async getServicesStatus() {
         try {
-            const { data } = await axios.get(this.urls.unityChatStatus, {
-                params: { unityChatStatus: true },
-                headers: {
-                    Authorization: `Bearer ${this.token}`
-                }
-            });
+            const { data } = await this._request('get', '/whatsapp/management/status');
             return data;
         } catch (e) {
-            console.error(e);
+            console.error('[UnityChatService] Falha ao consultar status dos serviços:', e.response?.data || e.message);
+            return null;
+        }
+    }
+
+    async reloadWhatsApp() {
+        try {
+            const { data } = await this._request('get', '/whatsapp/management/reload');
+            return data;
+        } catch (e) {
+            console.error('[UnityChatService] Falha ao recarregar WhatsApp bootstrap:', e.response?.data || e.message);
             return null;
         }
     }
 
     async getSessions() {
         try {
-            const { data } = await axios.get(this.urls.getSessions, {
-                headers: {
-                    Authorization: `Bearer ${this.token}`
-                }
-            });
+            const { data } = await this._request('get', '/accounts/services/sessions');
             return data;
         } catch (e) {
-            console.error(e);
+            console.error('[UnityChatService] Falha ao consultar lista de sessões:', e.response?.data || e.message);
             return null;
         }
     }
 
+    session(sessionIdentifier, options = {}) {
+        return new UnityChatSession(this.token, sessionIdentifier, this.apiVersion, {
+            baseURL: this.baseURL,
+            timeout: this.timeout,
+            ...options
+        });
+    }
+
     merger() {
-        console.log('UnityChat middleware executado')
         return async (req, res, next) => {
             try {
+                let authData = this.token ? { token: this.token } : null;
+                if (!authData) {
+                    authData = await this.authenticate();
+                }
+
                 req.services = {
+                    ...req.services,
                     unityChatService: {
-                        data: await this.authenticate()
+                        data: authData
                     }
                 };
                 next();
-            } catch {
+            } catch (err) {
                 req.services = {
+                    ...req.services,
                     unityChatService: {
-                        data: null
+                        data: null,
+                        error: err
                     }
                 };
                 next();
             }
-        }
+        };
+    }
+
+    // ==========================================
+    // SUBMÓDULOS DA API UNITYCHAT v1
+    // ==========================================
+
+    _initSubmodules() {
+        // 5. Contas & Usuários
+        this.accounts = {
+            get: async () => (await this._request('get', '/accounts')).data,
+            update: async (data) => (await this._request('put', '/accounts', { data })).data
+        };
+
+        this.users = {
+            list: async (params) => (await this._request('get', '/accounts/users', { params })).data,
+            create: async (data) => (await this._request('post', '/accounts/users', { data })).data,
+            update: async (data) => (await this._request('put', '/accounts/users', { data })).data,
+            delete: async (id) => (await this._request('delete', '/accounts/users', { data: { id } })).data
+        };
+
+        this.apiKeys = {
+            list: async (params) => (await this._request('get', '/accounts/api-keys', { params })).data,
+            create: async (data) => (await this._request('post', '/accounts/api-keys', { data })).data,
+            delete: async (id) => (await this._request('delete', '/accounts/api-keys', { data: { id }, params: { id } })).data
+        };
+
+        // 6. Controle de Acesso (RBAC)
+        this.roles = {
+            list: async (params) => (await this._request('get', '/accounts/roles', { params })).data,
+            create: async (data) => (await this._request('post', '/accounts/roles', { data })).data,
+            update: async (data) => (await this._request('put', '/accounts/roles', { data })).data,
+            getSelectRules: async () => (await this._request('get', '/accounts/roles/permissions/select-rules')).data
+        };
+
+        // 7. Contatos (CRM)
+        this.contacts = {
+            list: async (params) => (await this._request('get', '/accounts/contacts', { params })).data,
+            create: async (data) => (await this._request('post', '/accounts/contacts', { data })).data,
+            update: async (data) => (await this._request('put', '/accounts/contacts', { data })).data,
+            delete: async (id) => (await this._request('delete', '/accounts/contacts', { data: { id }, params: { id } })).data
+        };
+
+        // 8. Mensagens & Sessões Omnichannel
+        this.omnichannel = {
+            getServices: async () => (await this._request('get', '/accounts/services')).data,
+            getSessions: async () => (await this._request('get', '/accounts/services/sessions')).data,
+            getMetaOAuthUrl: async () => (await this._request('get', '/accounts/services/sessions/auth/meta/url')).data,
+            getMessages: async (params) => (await this._request('get', '/accounts/services/sessions/messages', { params })).data
+        };
+
+        // 9. Templates de Mensagens
+        this.messageTemplates = {
+            list: async () => (await this._request('get', '/accounts/message-templates')).data,
+            create: async (data) => (await this._request('post', '/accounts/message-templates', { data })).data,
+            update: async (data) => (await this._request('put', '/accounts/message-templates', { data })).data,
+            delete: async (id) => (await this._request('delete', '/accounts/message-templates', { data: { id }, params: { id } })).data
+        };
+
+        // 10. Campanhas em Massa (Bulk Campaigns)
+        this.bulkCampaigns = {
+            list: async () => (await this._request('get', '/accounts/bulk-campaigns')).data,
+            create: async (data) => (await this._request('post', '/accounts/bulk-campaigns', { data })).data,
+            update: async (data) => (await this._request('put', '/accounts/bulk-campaigns', { data })).data
+        };
+
+        // 11. Automações & Agentes IA
+        this.automations = {
+            list: async () => (await this._request('get', '/accounts/automations')).data,
+            create: async (data) => (await this._request('post', '/accounts/automations', { data })).data,
+            update: async (data) => (await this._request('put', '/accounts/automations', { data })).data,
+            delete: async (id) => (await this._request('delete', '/accounts/automations', { data: { id }, params: { id } })).data
+        };
+
+        // 12. Comunidades Inteligentes (Smart Communities)
+        this.smartCommunities = {
+            list: async () => (await this._request('get', '/accounts/smart-communities')).data,
+            create: async (data) => (await this._request('post', '/accounts/smart-communities', { data })).data,
+            getLogs: async () => (await this._request('get', '/accounts/smart-communities/logs')).data,
+            generatePreview: async (data) => (await this._request('post', '/accounts/smart-communities/generate-preview', { data })).data
+        };
+
+        // 13. Agendamentos & Calendários
+        this.calendars = {
+            list: async () => (await this._request('get', '/accounts/calendars')).data,
+            create: async (data) => (await this._request('post', '/accounts/calendars', { data })).data
+        };
+
+        this.schedules = {
+            list: async (params) => (await this._request('get', '/accounts/schedules', { params })).data,
+            create: async (data) => (await this._request('post', '/accounts/schedules', { data })).data
+        };
+
+        // 14. Central de Atendimento (Service Desk)
+        this.serviceDesk = {
+            getDashboard: async () => (await this._request('get', '/support/dashboard')).data,
+            getTickets: async (params) => (await this._request('get', '/accounts/service-desk/tickets', { params })).data,
+            assignTicket: async (id, data) => (await this._request('post', `/accounts/service-desk/tickets/${id}/assign`, { data })).data,
+            transferTicket: async (id, data) => (await this._request('post', `/accounts/service-desk/tickets/${id}/transfer`, { data })).data,
+            closeTicket: async (id, data) => (await this._request('post', `/accounts/service-desk/tickets/${id}/close`, { data })).data,
+            reopenTicket: async (id) => (await this._request('post', `/accounts/service-desk/tickets/${id}/reopen`)).data
+        };
+
+        // 15. Faturamento & Assinaturas (Billing)
+        this.billing = {
+            getSummary: async () => (await this._request('get', '/billing/summary')).data,
+            getPlans: async () => (await this._request('get', '/billing/plans')).data,
+            getInvoices: async () => (await this._request('get', '/billing/invoices')).data,
+            getPublicInvoice: async (uuid) => (await this._request('get', `/billing/public/${uuid}`)).data,
+            checkout: async (data) => (await this._request('post', '/billing/checkout', { data })).data
+        };
+
+        // 16. Webhooks
+        this.webhooks = {
+            list: async () => (await this._request('get', '/accounts/webhooks')).data,
+            create: async (data) => (await this._request('post', '/accounts/webhooks', { data })).data,
+            test: async (data) => (await this._request('post', '/accounts/webhooks/test', { data })).data
+        };
+
+        // 17. Mídias & Arquivos
+        this.media = {
+            getUrl: (filename, tempToken) => `${this.baseURL}/accounts/media/${filename}${tempToken ? `?token=${encodeURIComponent(tempToken)}` : ''}`,
+            download: async (filename, options = {}) => (await this._request('get', `/accounts/media/${filename}`, { responseType: 'stream', ...options })).data
+        };
+
+        // 18. Localizações
+        this.locations = {
+            getCountries: async () => (await this._request('get', '/locations/countries')).data,
+            getStates: async (countryId) => (await this._request('get', `/locations/states/${countryId}`)).data,
+            getCities: async (stateId) => (await this._request('get', `/locations/cities/${stateId}`)).data
+        };
+
+        // 19. Administração & Auditoria
+        this.admin = {
+            getStats: async () => (await this._request('get', '/admin/stats')).data,
+            getLogs: async () => (await this._request('get', '/admin/logs')).data,
+            getModules: async () => (await this._request('get', '/system/modules')).data
+        };
     }
 }
 
 class UnityChatSession {
-    constructor(token, sessionName, apiVersion = 2) {
-        this.token = token;
-        this.apiVersion = apiVersion;
-        this.sessionName = sessionName;
-        this.urls = {
-            connect: `https://api.unitychat.areum.com.br/api/v${apiVersion}/whatsapp/sessions`,
-            sessionClose: `https://api.unitychat.areum.com.br/api/v${apiVersion}/whatsapp/sessions`,
-            disconnect: `https://api.unitychat.areum.com.br/api/v${apiVersion}/whatsapp/sessions`,
-            getSessionStatus: `https://api.unitychat.areum.com.br/api/v${apiVersion}/whatsapp/sessions`,
-            getQRcode: `https://api.unitychat.areum.com.br/api/v${apiVersion}/whatsapp/sessions`,
-            sendMessage: `https://api.unitychat.areum.com.br/api/v${apiVersion}/whatsapp/messages`,
-            getMessages: `https://api.unitychat.areum.com.br/api/v${apiVersion}/whatsapp/messages`,
-            getConversations: `https://api.unitychat.areum.com.br/api/v${apiVersion}/whatsapp/conversations`,
+    constructor(token, sessionIdentifier, apiVersion = 1, options = {}) {
+        if (!token || typeof token !== 'string' || !token.trim()) {
+            throw new Error('Token é obrigatório para inicializar o UnityChatSession.');
         }
-        this.onError;
+        if (!sessionIdentifier) {
+            throw new Error('sessionName ou uuid é obrigatório para inicializar o UnityChatSession.');
+        }
+
+        this.token = token;
+        this.apiVersion = apiVersion || 1;
+        this.timeout = options.timeout || 30000;
+        this.baseURL = (options.baseURL || options.baseUrl || `https://api.unitychat.areum.com.br/api/v${this.apiVersion}`).replace(/\/$/, '');
+
+        // Resolução Híbrida: Suporta string (sessionName ou UUID) ou objeto { sessionName, uuid }
+        if (typeof sessionIdentifier === 'string') {
+            if (UUID_REGEX.test(sessionIdentifier)) {
+                this.uuid = sessionIdentifier;
+                this.sessionName = options.sessionName || null;
+            } else {
+                this.sessionName = sessionIdentifier;
+                this.uuid = options.uuid || null;
+            }
+        } else if (typeof sessionIdentifier === 'object' && sessionIdentifier !== null) {
+            this.sessionName = sessionIdentifier.sessionName || null;
+            this.uuid = sessionIdentifier.uuid || null;
+        }
+
+        this.urls = {
+            connect: `${this.baseURL}/whatsapp/sessions`,
+            disconnect: `${this.baseURL}/whatsapp/sessions`,
+            getSessionStatus: `${this.baseURL}/whatsapp/sessions`,
+            getQRcode: `${this.baseURL}/whatsapp/sessions`,
+            sendMessage: `${this.baseURL}/whatsapp/messages`,
+            getMessages: `${this.baseURL}/accounts/services/sessions/messages`,
+            getConversations: `${this.baseURL}/whatsapp/conversations`,
+            verifyNumber: `${this.baseURL}/whatsapp/wa-account-verify`,
+            groups: `${this.baseURL}/whatsapp/groups`,
+            newsletters: `${this.baseURL}/whatsapp/newsletters`,
+            me: `${this.baseURL}/whatsapp/sessions/me`
+        };
+
+        this.onError = null;
     }
 
+    _handleError(exc) {
+        if (typeof this.onError === 'function') {
+            this.onError(exc);
+        }
+        return exc?.response?.data || { error: exc.message || exc };
+    }
+
+    _getIdentifier() {
+        const id = {};
+        if (this.uuid) id.uuid = this.uuid;
+        if (this.sessionName) id.sessionName = this.sessionName;
+        return id;
+    }
+
+    _syncSessionUuid(data) {
+        if (data && data.uuid && !this.uuid) {
+            this.uuid = data.uuid;
+        }
+        return data;
+    }
+
+    // ==========================================
+    // 4. MÓDULO: WHATSAPP (CICLO DE VIDA & SESSÕES)
+    // ==========================================
+
+    /**
+     * Inicializa ou cria uma nova sessão do WhatsApp.
+     * Rota: POST /whatsapp/sessions
+     */
     async connect(options = {}) {
         try {
-            const { data } = await axios.post(this.urls.connect, { sessionName: this.sessionName, platform: options.platform, blockIncomingCalls: options.blockIncomingCalls }, {
-                headers: {
-                    Authorization: `Bearer ${this.token}`
-                }
-            });
-            return data;
-        } catch (exc) {
-            if (this.onError) {
-                this.onError(exc);
-            }
-            return exc;
-        }
-
-    }
-
-    //mode pode ser 'logout' ou 'destroy'
-    async disconnect(action = 'logout') {
-        try {
-            const { data } = await axios.delete(this.urls.disconnect, {
-                data: { sessionName: this.sessionName, action },
-                headers: {
-                    Authorization: `Bearer ${this.token}`
-                }
-            });
-            return data;
-        } catch (exc) {
-            //console.error(exc)
-            if (this.onError) {
-                this.onError(exc);
-            }
-            return exc;
-        }
-
-    }
-
-    async getStatus() {
-        try {
-            const { data } = await axios.get(this.urls.getSessionStatus, {
-                params: { sessionStatus: true, sessionName: this.sessionName },
-                headers: {
-                    Authorization: `Bearer ${this.token}`
-                }
-            });
-            return data;
-        } catch (exc) {
-            if (this.onError) {
-                this.onError(exc);
-            }
-            return exc;
-        }
-    }
-    //qrCode - Pode ter valor true ou 'render'
-    async getQRcode(qrCode = true) {
-        try {
-            const { data } = await axios.get(this.urls.getQRcode, {
-                params: { qrCode, sessionName: this.sessionName },
-                headers: {
-                    Authorization: `Bearer ${this.token}`
-                }
-            });
-            return data;
-        } catch (exc) {
-            if (this.onError) {
-                this.onError(exc);
-            }
-            return exc;
-        }
-    }
-    /* 
-    to: 5591...
-    type: text (body) 
-    type: link (title, url)
-    type: location (title, lat, long)
-    */
-    async sendMessage(message = { type: 'text' }) {
-        try {
-            const response = await axios.post(
-                this.urls.sendMessage,
-                {
-                    sessionName: this.sessionName,
-                    to: message.to,
-                    type: message.type,
-                    body: message.body,
-                    title: message.title,
-                    subtitle: message.subtitle,
-                    buttons: message.buttons,
-                    url: message.url,
-                    lat: message.lat,
-                    long: message.long
-                },
+            const payload = {
+                sessionName: this.sessionName,
+                ...options
+            };
+            const { data } = await axios.post(
+                this.urls.connect,
+                payload,
                 {
                     headers: {
                         Authorization: `Bearer ${this.token}`
                     },
-                    // 👇 força axios a não jogar 4xx/5xx no catch
+                    timeout: this.timeout
+                }
+            );
+            this._syncSessionUuid(data);
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Ações do ciclo de vida: 'disconnect', 'logout' ou 'reconnect'.
+     * Rota: PUT /whatsapp/sessions
+     */
+    async disconnect(action = 'disconnect') {
+        try {
+            const payload = {
+                ...this._getIdentifier(),
+                action
+            };
+
+            const response = await axios.put(this.urls.disconnect, payload, {
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+
+            this._syncSessionUuid(response?.data);
+            return response?.data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Desconecta e faz logout da sessão no WhatsApp.
+     */
+    async logout() {
+        return this.disconnect('logout');
+    }
+
+    /**
+     * Reconecta uma sessão desconectada.
+     */
+    async reconnect() {
+        return this.disconnect('reconnect');
+    }
+
+    /**
+     * Atualiza as configurações de bloqueios, PIX keys ou automações da sessão.
+     * Rota: PATCH /whatsapp/sessions
+     */
+    async updateConfig(config = {}) {
+        try {
+            const payload = {
+                ...this._getIdentifier(),
+                ...config
+            };
+            const { data } = await axios.patch(this.urls.connect, payload, {
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            this._syncSessionUuid(data);
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Deleta a sessão permanentemente da memória e do banco de dados.
+     * Rota: DELETE /whatsapp/sessions
+     */
+    async deleteSession() {
+        try {
+            const { data } = await axios.delete(this.urls.disconnect, {
+                data: this._getIdentifier(),
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Consulta o status atual da sessão.
+     * Rota: GET /whatsapp/sessions
+     */
+    async getStatus() {
+        try {
+            const { data } = await axios.get(this.urls.getSessionStatus, {
+                params: {
+                    ...this._getIdentifier()
+                },
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            this._syncSessionUuid(data);
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Obtém o QR Code para pareamento.
+     * qrCode pode ser: true, 'render' ou false (QRCodeFormat)
+     * Rota: GET /whatsapp/sessions?qrCode=...
+     */
+    async getQRcode(qrCode = 'render') {
+        try {
+            const { data } = await axios.get(this.urls.getQRcode, {
+                params: {
+                    ...this._getIdentifier(),
+                    qrCode
+                },
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            this._syncSessionUuid(data);
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    // ==========================================
+    // ENVIO DE MENSAGENS
+    // ==========================================
+
+    /**
+     * Envia mensagem de qualquer tipo suportado: text, link, location, poll ou raw.
+     * Rota: POST /whatsapp/messages
+     */
+    async sendMessage(message = { type: 'text' }) {
+        try {
+            const payload = {
+                ...this._getIdentifier(),
+                ...message
+            };
+
+            const response = await axios.post(
+                this.urls.sendMessage,
+                payload,
+                {
+                    headers: {
+                        Authorization: `Bearer ${this.token}`
+                    },
+                    timeout: this.timeout,
                     validateStatus: () => true
                 }
             );
-            const { data } = response;
+
+            const { data, status } = response;
+
+            if (status >= 400 && typeof this.onError === 'function') {
+                this.onError(new Error(`Erro HTTP ${status} ao enviar mensagem: ${JSON.stringify(data)}`));
+            }
+
             return data;
         } catch (exc) {
-            // só pega erros de rede, timeout, etc
-            if (this.onError) {
+            if (typeof this.onError === 'function') {
                 this.onError(exc);
             }
             return { error: exc };
         }
     }
 
+    /**
+     * Helper para envio de mensagem de texto simples ou com link formatado.
+     */
+    async sendText(to, text, options) {
+        return this.sendMessage({
+            to,
+            type: 'text',
+            body: text,
+            options
+        });
+    }
 
-    /* 
-    type: files, image, video 
-    type: files (caption, files, filename)
-    
-    */
-    async sendFiles(message = { type: 'files' }) {
+    /**
+     * Helper para envio de mensagem de link com pré-visualização.
+     */
+    async sendLink(to, linkData, options) {
+        return this.sendMessage({
+            to,
+            type: 'link',
+            ...(typeof linkData === 'string' ? { body: linkData } : linkData),
+            options
+        });
+    }
+
+    /**
+     * Helper para envio de coordenadas geográficas.
+     */
+    async sendLocation(to, lat, long, address) {
+        return this.sendMessage({
+            to,
+            type: 'location',
+            lat,
+            long,
+            address
+        });
+    }
+
+    /**
+     * Helper para envio de enquete interativa (Poll).
+     */
+    async sendPoll(to, pollName, pollOptions) {
+        return this.sendMessage({
+            to,
+            type: 'poll',
+            pollName,
+            pollOptions
+        });
+    }
+
+    /**
+     * Helper para envio de estrutura bruta / interativa com botões ou PIX.
+     */
+    async sendRaw(to, body, options) {
+        return this.sendMessage({
+            to,
+            type: 'raw',
+            body,
+            options
+        });
+    }
+
+    /**
+     * Envia arquivos anexados (imagens, vídeos, áudios e documentos) via multipart/form-data.
+     * Rota: POST /whatsapp/messages
+     */
+    async sendFiles(message = { type: 'document' }) {
         try {
             const form = new FormData();
 
-            // Adiciona os campos de texto ao formulário
-            form.append('sessionName', this.sessionName);
-            form.append('to', message.to);
-            form.append('type', message.type);
-            message.caption ? form.append('caption', message.caption) : null;
+            const identifier = this._getIdentifier();
+            if (identifier.uuid) form.append('uuid', identifier.uuid);
+            if (identifier.sessionName) form.append('sessionName', identifier.sessionName);
 
-            // Anexa arquivos ao formulário
-            for (const file of message.files) {
-                file.filename ? form.append('filename', file.filename) : null;
+            if (message.to) form.append('to', message.to);
+
+            // Mapeia legado 'files' para 'document'
+            let mediaType = message.type || 'document';
+            if (mediaType === 'files') {
+                mediaType = 'document';
+            }
+            form.append('type', mediaType);
+
+            if (message.caption) form.append('caption', message.caption);
+
+            const filesList = Array.isArray(message.files) ? message.files : [];
+
+            for (const file of filesList) {
+                const fileOptions = file.filename ? { filename: file.filename } : undefined;
+
                 if (file.path) {
-                    // Se o arquivo for fornecido como um caminho, cria um Stream de leitura
-                    form.append('files', fs.createReadStream(file.path));
+                    form.append('files', fs.createReadStream(file.path), fileOptions);
                 } else if (file.base64) {
-                    // Se o arquivo for fornecido como base64, converte para Buffer
-                    form.append('files', Buffer.from(file.base64, 'base64'));
+                    const cleanBase64 = file.base64.replace(/^data:[^;]+;base64,/, '');
+                    form.append('files', Buffer.from(cleanBase64, 'base64'), fileOptions);
                 } else if (file.stream) {
-                    // Se o arquivo for fornecido como Stream, anexa diretamente
-                    form.append('files', file.stream);
+                    form.append('files', file.stream, fileOptions);
                 } else if (file.buffer) {
-                    // Se o arquivo for fornecido como Buffer, anexa diretamente
-                    form.append('files', file.buffer);
+                    form.append('files', file.buffer, fileOptions);
                 }
             }
 
             const { data } = await axios.post(this.urls.sendMessage, form, {
                 headers: {
-                    ...form.getHeaders(), // Pega os cabeçalhos corretos da instância do FormData
+                    ...form.getHeaders(),
                     Authorization: `Bearer ${this.token}`
-                }
+                },
+                timeout: this.timeout
             });
 
             return data;
         } catch (exc) {
-            if (this.onError) {
-                this.onError(exc);
-            }
-            return exc;
+            return this._handleError(exc);
         }
     }
 
+    async sendImage(to, file, caption, options) {
+        return this.sendFiles({
+            to,
+            type: 'image',
+            caption,
+            files: [file],
+            options
+        });
+    }
+
+    async sendVideo(to, file, caption, options) {
+        return this.sendFiles({
+            to,
+            type: 'video',
+            caption,
+            files: [file],
+            options
+        });
+    }
+
+    async sendAudio(to, file, options) {
+        return this.sendFiles({
+            to,
+            type: 'audio',
+            files: [file],
+            options
+        });
+    }
+
+    async sendDocument(to, file, caption, options) {
+        return this.sendFiles({
+            to,
+            type: 'document',
+            caption,
+            files: [file],
+            options
+        });
+    }
+
+    // ==========================================
+    // HISTÓRICO, CONVERSAS E VALIDAÇÕES
+    // ==========================================
+
+    /**
+     * Consulta histórico de mensagens de uma conversa.
+     * Rota: GET /whatsapp/conversations
+     */
+    async getConversations(options = {}) {
+        try {
+            const chatId = options.chatId || options.from;
+            const limit = options.limit || 50;
+
+            const { data } = await axios.get(this.urls.getConversations, {
+                params: {
+                    ...this._getIdentifier(),
+                    chatId,
+                    limit
+                },
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Verifica se um número está registrado no WhatsApp (isOnWhatsApp).
+     * Rota: GET /whatsapp/wa-account-verify
+     */
+    async verifyNumber(id) {
+        try {
+            const { data } = await axios.get(this.urls.verifyNumber, {
+                params: {
+                    ...this._getIdentifier(),
+                    id
+                },
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Alias para verifyNumber.
+     */
+    async isOnWhatsApp(id) {
+        return this.verifyNumber(id);
+    }
+
+    /**
+     * Lista todos os grupos ou obtém metadados de um grupo específico.
+     * Rota: GET /whatsapp/groups
+     */
+    async getGroups(groupId) {
+        try {
+            const params = {
+                ...this._getIdentifier()
+            };
+            if (groupId) {
+                params.id = groupId;
+            }
+            const { data } = await axios.get(this.urls.groups, {
+                params,
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Lista todos os canais/newsletters ou metadados de um canal específico.
+     * Rota: GET /whatsapp/newsletters
+     */
+    async getNewsletters(newsletterId) {
+        try {
+            const params = {
+                ...this._getIdentifier()
+            };
+            if (newsletterId) {
+                params.id = newsletterId;
+            }
+            const { data } = await axios.get(this.urls.newsletters, {
+                params,
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Obtém informações do perfil da conta conectada (Push Name, LID, foto).
+     * Rota: GET /whatsapp/sessions/me
+     */
+    async getMe() {
+        try {
+            const { data } = await axios.get(this.urls.me, {
+                params: {
+                    ...this._getIdentifier()
+                },
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Consulta banco centralizado de mensagens omnichannel.
+     * Rota: GET /accounts/services/sessions/messages
+     */
     async getMessages(options = {}) {
         try {
             const { data } = await axios.get(this.urls.getMessages, {
-                params: { sessionName: this.sessionName, from: options.from, mode: options.mode },
+                params: {
+                    ...this._getIdentifier(),
+                    from: options.from,
+                    mode: options.mode,
+                    chat_id: options.chatId || options.chat_id,
+                    limit: options.limit
+                },
                 headers: {
                     Authorization: `Bearer ${this.token}`
-                }
+                },
+                timeout: this.timeout
             });
             return data;
         } catch (exc) {
-            if (this.onError) {
-                this.onError(exc);
-            }
-        }
-    }
-
-    async getConversations(options = {}) {
-        try {
-            const { data } = await axios.get(this.urls.getConversations, {
-                params: { sessionName: this.sessionName, from: options.from },
-                headers: {
-                    Authorization: `Bearer ${this.token}`
-                }
-            });
-            return data;
-        } catch (exc) {
-            if (this.onError) {
-                this.onError(exc);
-            }
+            return this._handleError(exc);
         }
     }
 }
@@ -335,4 +1020,4 @@ module.exports = {
     UnityChatService,
     UnityChatSession,
     UnityChatSessionsManager,
-}
+};

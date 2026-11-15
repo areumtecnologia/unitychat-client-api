@@ -1,20 +1,27 @@
 {
   "name": "@areumtecnologia/unitychat-client-api",
-  "version": "1.0.4",
-  "description": "Biblioteca de acesso do cliente a API UnityChat",
+  "version": "1.2.0",
+  "description": "Biblioteca client oficial em Node.js para integração com a API v1 do UnityChat",
   "keywords": [
-    "unitychat"
+    "unitychat",
+    "whatsapp",
+    "crm",
+    "omnichannel",
+    "wasockets"
   ],
   "license": "ISC",
   "author": "Áreum Tecnologia",
   "type": "commonjs",
   "main": "index.js",
+  "types": "index.d.ts",
   "files": [
     "index.js",
+    "index.d.ts",
     "src"
   ],
   "scripts": {
-    "test": "node --no-warnings tests/test-api.js"
+    "test": "node tests/test-import.js",
+    "test:api": "node --no-warnings tests/test-api.js"
   },
   "dependencies": {
     "axios": "^1.18.0",

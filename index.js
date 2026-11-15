@@ -1,11 +1,16 @@
 const { UnityChatService, UnityChatSession, UnityChatSessionsManager } = require('./src/unitychat');
 const {
     DisconnectAction,
+    SessionAction,
     QRCodeFormat,
     MessageType,
     FileType,
     MessageMode,
-    Platform
+    Platform,
+    TicketStatus,
+    TriggerType,
+    ActionType,
+    PixKeyType
 } = require('./src/enums');
 
 module.exports = {
@@ -13,10 +18,14 @@ module.exports = {
     UnityChatSession,
     UnityChatSessionsManager,
     DisconnectAction,
+    SessionAction,
     QRCodeFormat,
     MessageType,
     FileType,
     MessageMode,
-    Platform
+    Platform,
+    TicketStatus,
+    TriggerType,
+    ActionType,
+    PixKeyType
 };
-

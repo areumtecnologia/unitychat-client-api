@@ -1,16 +1,21 @@
-# unitychat-client-api
+# @areumtecnologia/unitychat-client-api
 
-Biblioteca client oficial em Node.js para integração com a API do **UnityChat**.
+Biblioteca client oficial em Node.js para integração com a **API v1 do UnityChat**.
 
-Esta biblioteca facilita a autenticação, gerenciamento de sessões do WhatsApp, envio de mensagens (incluindo mensagens estruturadas/customizadas e tipos de dados flexíveis), envio de arquivos (através de Streams, Buffers, caminhos locais ou strings Base64), além de fornecer um middleware integrado para Express e um gerenciador de sessões em memória.
-
-Para garantir robustez e evitar erros de digitação pelo desenvolvedor, a biblioteca fornece **Enumeradores Estáticos** (tipos estáticos congelados) para todas as opções de configuração e tipos de dados de strings repetitivas da API.
+Esta biblioteca fornece uma interface completa, fortemente tipada e com suporte a TypeScript para todos os módulos e endpoints canônicos da API UnityChat:
+- **WhatsApp Core (WaSockets)**: Resolução híbrida via `uuid` ou `sessionName`, pareamento com QR Code, ciclo de vida (reconectar, desconectar, logout), configurações de bloqueios e PIX, envio de mensagens (texto, link, mídias, documentos, localização, enquetes e botões interativos/PIX), histórico de conversas, validação de números (`isOnWhatsApp`), grupos, canais/newsletters e perfil conectado.
+- **Autenticação & Contas**: Login com credenciais, autenticação via API Key, perfil `/me`, recuperação e redefinição de senha, registro e ativação de contas.
+- **CRM & Gestão**: Contatos, usuários, papéis e permissões (RBAC), chaves de API, templates de mensagens e campanhas em massa.
+- **Automações & IA**: Fluxos de automação com palavras-chave, agentes inteligentes e comunidades inteligentes para moderação de grupos e canais.
+- **Central de Atendimento (Service Desk)**: Filas de atendimento, triagem, atribuição, transferência, encerramento e reabertura de tickets.
+- **Faturamento & Assinaturas (Billing)**: Faturas, planos, consulta pública de fatura e checkout PIX/Cartão.
+- **Webhooks & Integrações**: Configuração e teste de disparos de eventos.
+- **Enumeradores Estáticos Congelados**: Previnem erros de digitação e facilitam o autocomplete.
+- **Express Middleware**: Middleware `.merger()` para autenticação automática e injeção do serviço nas requisições.
 
 ---
 
-## Instalação
-
-Instale a biblioteca em seu projeto utilizando o npm ou yarn:
+## 📦 Instalação
 
 ```bash
 npm install @areumtecnologia/unitychat-client-api
@@ -18,7 +23,7 @@ npm install @areumtecnologia/unitychat-client-api
 
 ---
 
-## Importação
+## 🚀 Importação
 
 ```javascript
 const { 
@@ -26,332 +31,369 @@ const {
     UnityChatSession, 
     UnityChatSessionsManager,
     DisconnectAction,
+    SessionAction,
     QRCodeFormat,
     MessageType,
     FileType,
     MessageMode,
-    Platform
+    Platform,
+    TicketStatus,
+    TriggerType,
+    ActionType,
+    PixKeyType
 } = require('@areumtecnologia/unitychat-client-api');
 ```
 
 ---
 
-## Enumeradores Estáticos (Evitando Strings Mágicas)
+## 🔒 Enumeradores Estáticos (Tipagem Segura)
 
-Utilize estes enumeradores para evitar o uso de strings brutas (strings mágicas) que podem ser escritas incorretamente. Todos os objetos são congelados (`Object.freeze`) para evitar modificações acidentais:
+Todos os enumeradores são congelados (`Object.freeze`) para garantir a imutabilidade:
 
-*   **`Platform`**: Plataformas suportadas para inicializar sessões de WhatsApp.
-    *   `Platform.ANDROID` (`'android'`)
-    *   `Platform.CHROME` (`'chrome'`)
-*   **`DisconnectAction`**: Tipos de desconexão para uma sessão.
-    *   `DisconnectAction.LOGOUT` (`'logout'`) - Mantém as credenciais mas desconecta o cliente.
-    *   `DisconnectAction.DESTROY` (`'destroy'`) - Destrói completamente o cache e credenciais.
-*   **`QRCodeFormat`**: Opções de retorno do QR Code.
-    *   `QRCodeFormat.RAW` (`true`) - Retorna os dados em string limpa.
-    *   `QRCodeFormat.RENDER` (`'render'`) - Retorna os dados prontos para renderização em tela.
-    *   `QRCodeFormat.NONE` (`false`) - Desativa a geração de QR Code.
-*   **`MessageType`**: Tipos de mensagens a serem enviadas por `sendMessage`.
+*   **`SessionAction` / `DisconnectAction`**:
+    *   `SessionAction.RECONNECT` (`'reconnect'`) - Reconecta a sessão no serviço.
+    *   `SessionAction.DISCONNECT` (`'disconnect'`) - Desconecta a sessão mantendo as credenciais.
+    *   `SessionAction.LOGOUT` (`'logout'`) - Realiza o logout completo no WhatsApp.
+*   **`QRCodeFormat`**:
+    *   `QRCodeFormat.RENDER` (`'render'`) - Retorna tag HTML pronta para renderização em tela.
+    *   `QRCodeFormat.RAW` (`true`) - Retorna objeto JSON com Base64 e ASCII.
+    *   `QRCodeFormat.NONE` (`false`) - Não gera QR Code.
+*   **`MessageType`**:
     *   `MessageType.TEXT` (`'text'`)
     *   `MessageType.LINK` (`'link'`)
     *   `MessageType.LOCATION` (`'location'`)
-    *   `MessageType.RAW` (`'raw'`)
-*   **`FileType`**: Tipos de arquivos para envio de mídias por `sendFiles`.
+    *   `MessageType.POLL` (`'poll'`) - Enquete com opções.
+    *   `MessageType.RAW` (`'raw'`) - Botões interativos, PIX ou estruturas customizadas.
+    *   `MessageType.IMAGE` (`'image'`)
+    *   `MessageType.VIDEO` (`'video'`)
+    *   `MessageType.AUDIO` (`'audio'`)
+    *   `MessageType.DOCUMENT` (`'document'`)
+*   **`FileType`**:
     *   `FileType.FILES` (`'files'`)
     *   `FileType.IMAGE` (`'image'`)
     *   `FileType.VIDEO` (`'video'`)
     *   `FileType.AUDIO` (`'audio'`)
-*   **`MessageMode`**: Filtros de tipos de chats para buscas de mensagens.
-    *   `MessageMode.CHAT` (`'chat'`)
-    *   `MessageMode.GROUPS` (`'groups'`)
+    *   `FileType.DOCUMENT` (`'document'`)
+*   **`Platform`**: `Platform.ANDROID` (`'android'`), `Platform.CHROME` (`'chrome'`).
+*   **`TicketStatus`**: `TicketStatus.OPEN` (`'open'`), `TicketStatus.IN_PROGRESS` (`'in_progress'`), `TicketStatus.CLOSED` (`'closed'`).
+*   **`TriggerType`**: `TriggerType.KEYWORD` (`'keyword'`), `TriggerType.WELCOME` (`'welcome'`), `TriggerType.FALLBACK` (`'fallback'`), `TriggerType.AI_AGENT` (`'ai_agent'`).
+*   **`ActionType`**: `ActionType.SEND_TEXT` (`'send_text'`), `ActionType.SEND_MENU` (`'send_menu'`), `ActionType.CALL_WEBHOOK` (`'call_webhook'`), `ActionType.TRANSFER_QUEUE` (`'transfer_queue'`).
+*   **`PixKeyType`**: `PixKeyType.CPF` (`'CPF'`), `PixKeyType.CNPJ` (`'CNPJ'`), `PixKeyType.EMAIL` (`'EMAIL'`), `PixKeyType.PHONE` (`'PHONE'`), `PixKeyType.EVP` (`'EVP'`).
 
 ---
 
-## Como Usar
+## 📱 Módulo: WhatsApp (WaSockets Core)
 
-### 1. Autenticação e Status do Serviço (`UnityChatService`)
+O `UnityChatSession` gerencia uma sessão do WhatsApp. Suporta **identificação híbrida**: você pode instanciar passando o **`sessionName`** (ex: `'5511999999999'`) ou o **`uuid`** gerado na criação da sessão.
 
-O `UnityChatService` é responsável por autenticar suas credenciais (API Key) e obter o token temporário necessário para interagir com as sessões do WhatsApp. Ele também gerencia o status geral dos serviços e sessões da conta.
-
-```javascript
-// O segundo parâmetro (apiVersion) é opcional e tem como padrão 1
-const unityChatService = new UnityChatService('SUA_API_KEY', 1);
-
-async function iniciar() {
-    // 1. Autenticar para obter o token de acesso
-    const authData = await unityChatService.authenticate();
-    if (!authData) {
-        console.error('Falha na autenticação. Verifique sua API Key.');
-        return;
-    }
-    console.log('Autenticado com sucesso! Token:', unityChatService.token);
-
-    // 2. Verificar o status dos serviços do UnityChat
-    const status = await unityChatService.getServicesStatus();
-    console.log('Status do serviço:', status);
-
-    // 3. Obter a lista de todas as sessões ativas da conta
-    const sessions = await unityChatService.getSessions();
-    console.log('Sessões ativas:', sessions);
-
-    // 4. Revogar o token quando não for mais necessário
-    // await unityChatService.revoke();
-}
-
-iniciar();
-```
-
-#### Middleware para Express (`merger`)
-
-Se você estiver usando Express, pode usar o método `.merger()` como um middleware para injetar automaticamente os dados de autenticação nas requisições:
+### 1. Inicializando uma Sessão
 
 ```javascript
-const express = require('express');
-const app = express();
+// Usando sessionName
+const session = new UnityChatSession(token, 'minha-sessao-vendas');
 
-app.use(unityChatService.merger());
+// Ou usando UUID diretamente
+const session = new UnityChatSession(token, '4c6a9e1d-8472-4b71-91ea-69e12089b0cf');
 
-app.get('/minha-rota', (req, res) => {
-    // Os dados autenticados estarão disponíveis em req.services.unityChatService.data
-    const authData = req.services.unityChatService.data;
-    res.json({ status: 'OK', authData });
-});
-```
+// Ou através da factory do UnityChatService
+const session = unityChatService.session('minha-sessao-vendas');
 
----
-
-### 2. Gerenciamento de Sessões do WhatsApp (`UnityChatSession`)
-
-Uma vez autenticado, você pode criar instâncias de `UnityChatSession` usando o token gerado para interagir com instâncias individuais do WhatsApp.
-
-```javascript
-// O terceiro parâmetro (apiVersion) é opcional e tem como padrão 2
-const session = new UnityChatSession(unityChatService.token, 'nome_da_sessao', 2);
-
-// Opcional: callback para capturar erros de requisições da sessão
-session.onError = (error) => {
-    console.error('Erro na sessão:', error.message || error);
+session.onError = (err) => {
+    console.error('Erro na sessão:', err.message || err);
 };
 ```
 
-#### Conectar uma Sessão
-
-Inicia ou conecta a sessão do WhatsApp. Você pode passar opções de configuração adicionais.
+### 2. Conexão, QR Code e Status
 
 ```javascript
-async function conectarSessao() {
-    const response = await session.connect({
-        platform: Platform.ANDROID, // Usando Platform enum em vez de 'android'
-        blockIncomingCalls: true // Opcional (bloquear chamadas recebidas no WhatsApp)
-    });
-    console.log('Conexão iniciada:', response);
-}
-```
+// 1. Iniciar conexão (POST /whatsapp/sessions)
+const conn = await session.connect({ platform: Platform.ANDROID, blockIncomingCalls: true });
+console.log('UUID da sessão gerado:', session.uuid);
 
-#### Desconectar ou Destruir Sessão
+// 2. Obter QR Code (GET /whatsapp/sessions?qrCode=render)
+const qrHtml = await session.getQRcode(QRCodeFormat.RENDER);
 
-```javascript
-// Desconectar (fazer logout mantendo os dados da sessão)
-await session.disconnect(DisconnectAction.LOGOUT);
-
-// Destruir completamente a sessão (remove credenciais e desconecta)
-await session.disconnect(DisconnectAction.DESTROY);
-```
-
-#### Obter Status e QR Code
-
-```javascript
-// Verificar status atual do serviço da sessão
+// 3. Consultar status atual (connecting, connected, pairing_code, disconnected)
 const status = await session.getStatus();
 console.log('Status da sessão:', status);
-
-// Obter o QR Code para pareamento
-const qrData = await session.getQRcode(QRCodeFormat.RENDER);
-console.log('QR Code:', qrData);
 ```
 
----
-
-### 3. Envio de Mensagens e Arquivos
-
-#### Enviar Mensagens (Texto, Links, Localização ou Raw/Custom)
-
-O método `sendMessage` aceita uma variedade de estruturas de mensagens:
+### 3. Ciclo de Vida & Configurações da Sessão
 
 ```javascript
-// 1. Mensagem de Texto Simples
-await session.sendMessage({
-    to: '5591999999999', // Número com DDI + DDD + Telefone
-    type: MessageType.TEXT,
-    body: 'Olá! Esta é uma mensagem de teste.'
+// Reconectar uma sessão
+await session.reconnect();
+
+// Desconectar temporariamente mantendo credenciais
+await session.disconnect(SessionAction.DISCONNECT);
+
+// Logout completo do WhatsApp
+await session.logout();
+
+// Atualizar configurações e regras de bloqueio (PATCH /whatsapp/sessions)
+await session.updateConfig({
+    block_incoming_calls: true,
+    block_audio_messages: false,
+    block_empty_text_messages: true,
+    pix_keys: [
+        { key: '12345678909', type: PixKeyType.CPF, name: 'Minha Empresa LTDA' }
+    ]
 });
 
-// 2. Link com pré-visualização
-await session.sendMessage({
-    to: '5591999999999',
-    type: MessageType.LINK,
-    title: 'Áreum Tecnologia',
-    subtitle: 'Visite nosso site',
+// Deletar a sessão permanentemente (DELETE /whatsapp/sessions)
+await session.deleteSession();
+```
+
+### 4. Envio de Mensagens
+
+#### A. Texto Puro e Links
+```javascript
+// Texto simples
+await session.sendText('5511999999999', 'Olá! Como posso ajudar você hoje?');
+
+// Link com preview
+await session.sendLink('5511999999999', {
     url: 'https://unitychat.areum.com.br',
-    body: 'Opcional: texto que acompanha o link'
-});
-
-// 3. Localização geográfica
-await session.sendMessage({
-    to: '5591999999999',
-    type: MessageType.LOCATION,
-    title: 'Nossa Localização',
-    lat: -1.455833,
-    long: -48.503889
-});
-
-// 4. Mensagem customizada/estruturada (Type 'raw')
-// Útil para enviar botões interativos, templates complexos ou estruturas específicas da API do WhatsApp
-await session.sendMessage({
-    to: '5591999999999',
-    type: MessageType.RAW,
-    body: {
-        title: '📣 Lembrete de Pagamento',
-        text: 'Olá!\n\nSua fatura com vencimento está disponível para pagamento!',
-        footer: 'Efetue o pagamento de sua mensalidade usando o link copia e cola abaixo:',
-        interactiveButtons: [
-            // Definição dos botões interativos suportados pela API
-        ]
-    }
+    title: 'UnityChat Omnichannel',
+    body: 'Conheça nossa plataforma de atendimento'
 });
 ```
 
-#### Enviar Arquivos (Imagens, Vídeos, PDFs, etc.)
+#### B. Localização Geográfica
+```javascript
+await session.sendLocation(
+    '5511999999999',
+    -23.55052,
+    -46.633308,
+    'Av. Paulista, 1000 - São Paulo, SP'
+);
+```
 
-O método `sendFiles` suporta o envio de múltiplos arquivos a partir de caminhos locais, Buffers, Streams ou strings Base64 de forma transparente:
+#### C. Enquetes (Polls)
+```javascript
+await session.sendPoll(
+    '5511999999999',
+    'Qual o melhor horário para entrarmos em contato?',
+    ['Manhã (09h - 12h)', 'Tarde (14h - 18h)', 'Noite (19h - 21h)']
+);
+```
+
+#### D. Mensagens Interativas / Botões / PIX (Raw)
+```javascript
+await session.sendRaw('5511999999999', {
+    title: 'Confirmação do Pedido #1234',
+    text: 'Seu pedido foi faturado com sucesso!',
+    footer: 'UnityChat Nexus',
+    interactiveButtons: [
+        {
+            name: 'cta_copy',
+            buttonParamsJson: {
+                display_text: 'Copiar Chave PIX',
+                copy_code: '00020126360014br.gov.bcb.pix...'
+            }
+        },
+        {
+            name: 'cta_url',
+            buttonParamsJson: {
+                display_text: 'Rastrear Pedido',
+                url: 'https://meupedido.com/1234'
+            }
+        }
+    ]
+});
+```
+
+#### E. Mídias e Arquivos (Imagens, Vídeos, Áudios e Documentos)
+O método `sendFiles` ou os helpers específicos cuidam de multipart/form-data com suporte a arquivos em disco, Buffers, Streams ou Base64:
 
 ```javascript
-// Enviar arquivo a partir de um caminho no sistema de arquivos local
+// Imagem a partir de arquivo local
+await session.sendImage('5511999999999', { path: './comprovante.jpg', filename: 'comprovante.jpg' }, 'Segue o comprovante');
+
+// Documento em PDF
+await session.sendDocument('5511999999999', { path: './contrato.pdf', filename: 'contrato.pdf' }, 'Contrato assinado');
+
+// Áudio gravado (enviado com recording indicator)
+await session.sendAudio('5511999999999', { path: './audio.mp3', filename: 'audio.mp3' });
+
+// Múltiplos arquivos via sendFiles
 await session.sendFiles({
-    to: '5591999999999',
-    type: FileType.FILES,
-    caption: 'Segue o relatório em anexo',
+    to: '5511999999999',
+    type: FileType.DOCUMENT,
+    caption: 'Documentos do processo',
     files: [
-        {
-            filename: 'relatorio.pdf',
-            path: './caminho/para/o/relatorio.pdf'
-        }
+        { filename: 'doc1.pdf', path: './doc1.pdf' },
+        { filename: 'doc2.pdf', buffer: bufferData }
     ]
 });
+```
 
-// Enviar arquivo a partir de uma String Base64
-await session.sendFiles({
-    to: '5591999999999',
-    type: FileType.IMAGE,
-    caption: 'Foto de perfil',
-    files: [
-        {
-            filename: 'imagem.png',
-            base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
-        }
-    ]
-});
+### 5. Histórico, Validações e Comunidades
 
-// Enviar arquivo a partir de um Buffer
-const fs = require('fs');
-const buffer = fs.readFileSync('./foto.jpg');
+```javascript
+// 1. Consultar histórico de conversa (GET /whatsapp/conversations)
+const historico = await session.getConversations({ chatId: '5511999999999@s.whatsapp.net', limit: 30 });
 
-await session.sendFiles({
-    to: '5591999999999',
-    type: FileType.FILES,
-    files: [
-        {
-            filename: 'foto.jpg',
-            buffer: buffer
-        }
-    ]
-});
+// 2. Verificar se um número possui conta no WhatsApp (GET /whatsapp/wa-account-verify)
+const check = await session.isOnWhatsApp('5511999999999');
+if (check.exists) {
+    console.log('JID Oficial:', check.jid);
+}
 
-// Enviar arquivo a partir de um Stream (ex: do próprio fs ou de requisições de rede)
-const stream = fs.createReadStream('./documento.docx');
+// 3. Listar grupos ou obter metadados (GET /whatsapp/groups)
+const todosGrupos = await session.getGroups();
+const detalhesGrupo = await session.getGroups('120363000000000000@g.us');
 
-await session.sendFiles({
-    to: '5591999999999',
-    type: FileType.FILES,
-    files: [
-        {
-            filename: 'documento.docx',
-            stream: stream
-        }
-    ]
-});
+// 4. Listar canais / newsletters (GET /whatsapp/newsletters)
+const canais = await session.getNewsletters();
+
+// 5. Perfil da conta conectada (GET /whatsapp/sessions/me)
+const me = await session.getMe();
+console.log('Conectado como:', me.name, me.id);
 ```
 
 ---
 
-### 4. Consultas (Conversas e Mensagens)
+## 🏢 Módulo: Autenticação, Contas & Submódulos
 
-#### Listar Conversas
+O `UnityChatService` unifica o acesso aos submódulos corporativos da API v1:
+
 ```javascript
-const conversas = await session.getConversations({
-    from: '5591999999999' // Opcional: filtrar conversas de um remetente específico
-});
-console.log('Conversas:', conversas);
+const unityChatService = new UnityChatService('SUA_API_KEY');
+
+// Autenticar com a API Key para obter o Bearer Token
+await unityChatService.authenticate();
 ```
 
-#### Listar Mensagens
+### 1. Autenticação & Usuários
 ```javascript
-const mensagens = await session.getMessages({
-    from: '5591999999999', // Opcional: filtrar mensagens de um remetente específico
-    mode: MessageMode.CHAT // Usando MessageMode enum
+// Login com e-mail e senha
+const loginData = await unityChatService.login({ username: 'operador@empresa.com', password: '123' });
+
+// Consultar perfil do usuário autenticado (GET /authentication/me)
+const me = await unityChatService.getMe();
+
+// Recuperação de senha
+await unityChatService.forgotPassword('operador@empresa.com');
+await unityChatService.resetPassword({ token: 'reset_token', newPassword: 'nova_senha_forte' });
+
+// Registro e ativação de nova conta
+await unityChatService.register({ name: 'João', email: 'joao@empresa.com', password: '123', company: 'Minha Empresa' });
+await unityChatService.activateAccount('activation_token');
+```
+
+### 2. Contatos (CRM)
+```javascript
+// Listar contatos com busca e paginação
+const contatos = await unityChatService.contacts.list({ page: 1, limit: 20, search: 'Silva' });
+
+// Criar contato
+const novoContato = await unityChatService.contacts.create({
+    name: 'Maria Silva',
+    phone: '5511988887777',
+    email: 'maria@gmail.com',
+    tags: 'lead,vip'
 });
-console.log('Mensagens:', mensagens);
+```
+
+### 3. Templates de Mensagens & Campanhas em Massa
+```javascript
+// Listar templates salvos
+const templates = await unityChatService.messageTemplates.list();
+
+// Disparar campanha em massa
+await unityChatService.bulkCampaigns.create({
+    name: 'Promoção Black Friday',
+    session_id: 1,
+    message_body: 'Olá {{1}}, aproveite nosso cupom de 20%!',
+    recipients: [
+        { phone: '5511999999999', variables: { '1': 'Carlos' } }
+    ]
+});
+```
+
+### 4. Central de Atendimento (Service Desk)
+```javascript
+// Dashboard de atendimento em tempo real
+const dashboard = await unityChatService.serviceDesk.getDashboard();
+
+// Listar tickets abertos
+const tickets = await unityChatService.serviceDesk.getTickets({ status: TicketStatus.OPEN });
+
+// Atribuir, transferir ou encerrar ticket
+await unityChatService.serviceDesk.assignTicket(101, { user_id: 5 });
+await unityChatService.serviceDesk.transferTicket(101, { department_id: 2 });
+await unityChatService.serviceDesk.closeTicket(101, { resolution: 'RESOLVED', rating: 5 });
+```
+
+### 5. Faturamento & Assinaturas (Billing)
+```javascript
+// Resumo do plano e consumo
+const summary = await unityChatService.billing.getSummary();
+
+// Faturas emitidas
+const faturas = await unityChatService.billing.getInvoices();
+
+// Gerar sessão de checkout para pagamento via PIX ou Cartão
+const checkout = await unityChatService.billing.checkout({ plan_id: 2, payment_method: 'pix' });
+```
+
+### 6. Webhooks
+```javascript
+// Cadastrar webhook para receber eventos
+await unityChatService.webhooks.create({
+    url: 'https://meuservidor.com/webhook',
+    secret_key: 'meu_segredo_hmac',
+    events: ['messages.received', 'status.change', 'tickets.created']
+});
+
+// Testar webhook
+await unityChatService.webhooks.test({ url: 'https://meuservidor.com/webhook' });
 ```
 
 ---
 
-### 5. Gerenciador de Sessões Ativas (`UnityChatSessionsManager`)
+## 🗄️ Gerenciador de Sessões em Memória (`UnityChatSessionsManager`)
 
-Caso sua aplicação gerencie múltiplas instâncias de sessões do WhatsApp simultaneamente, você pode usar o `UnityChatSessionsManager` para organizá-las e recuperá-las dinamicamente em memória.
+Armazena instâncias de sessões em memória com resolução automática por **sessionName** ou **UUID**:
 
 ```javascript
 const manager = new UnityChatSessionsManager();
 
-// Criar e registrar sessões no gerenciador
-const sessionA = new UnityChatSession(token, 'sessao_a');
-const sessionB = new UnityChatSession(token, 'sessao_b');
+const session = new UnityChatSession(token, 'sessao-principal');
+manager.add(session);
 
-manager.add(sessionA);
-manager.add(sessionB);
+// Recuperar por sessionName
+const s1 = manager.get('sessao-principal');
 
-// Obter uma sessão registrada específica
-const minhaSessao = manager.get('sessao_a');
+// Se a sessão possuir UUID, também pode ser recuperada diretamente por ele
+const s2 = manager.get(session.uuid);
 
-// Obter todas as sessões registradas (retorna um objeto com nome da sessão como chave)
-const todasSessoes = manager.getAll();
-
-// Remover uma sessão do gerenciador
-manager.remove('sessao_a');
+// Listar todas as sessões registradas
+const todas = manager.getAll();
 ```
 
 ---
 
-## Desenvolvimento e Testes
+## 🌐 Middleware para Express (`merger`)
 
-Se desejar contribuir ou rodar testes locais:
+```javascript
+const express = require('express');
+const { UnityChatService } = require('@areumtecnologia/unitychat-client-api');
 
-1. Clone o repositório.
-2. Crie um arquivo `.env` na raiz do projeto com sua API Key:
-   ```env
-   UNITYCHAT_API_KEY=sua_api_key_aqui
-   ```
-3. Instale as dependências:
-   ```bash
-   npm install
-   ```
-4. Execute os testes de importação e de integração da API:
-   ```bash
-   # Executa os testes de importação de classes e enums
-   node tests/test-import.js
+const app = express();
+const unityChatService = new UnityChatService(process.env.UNITYCHAT_API_KEY);
 
-   # Executa os testes de integração com a API usando a chave fornecida no .env
-   npm test
-   ```
+app.use(unityChatService.merger());
 
-## Licença
+app.get('/minha-rota', (req, res) => {
+    const authData = req.services.unityChatService.data;
+    res.json({ status: 'OK', token: authData?.token });
+});
+```
 
-Distribuído sob a licença **ISC**. Veja o arquivo `package.json` para mais detalhes.
+---
+
+## 📄 Licença e Suporte
+- **Mantido por**: Áreum Tecnologia
+- **Suporte Técnico**: `suporte@areum.com.br`
