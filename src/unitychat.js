@@ -533,6 +533,12 @@ class UnityChatSession {
             this._syncSessionUuid(data);
             return data;
         } catch (exc) {
+            try {
+                const statusData = await this.getStatus();
+                if (statusData && statusData.status && !statusData.error) {
+                    return statusData;
+                }
+            } catch (statusErr) {}
             return this._handleError(exc);
         }
     }
