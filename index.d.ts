@@ -199,8 +199,8 @@ export class UnityChatService {
     getMe(): Promise<any | null>;
     forgotPassword(email: string): Promise<any | null>;
     resetPassword(data: { token: string; newPassword?: string; password?: string }): Promise<any | null>;
-    register(accountData: { name: string; email: string; password: string; company: string; phone?: string; [key: string]: any }): Promise<any | null>;
-    activateAccount(token: string): Promise<any | null>;
+    register(accountData: { name: string; email: string; phone?: string; website?: string; [key: string]: any }): Promise<any | null>;
+    activateAccount(keyOrToken: string | { key?: string; token?: string }): Promise<any | null>;
     logout(): Promise<any | null>;
     revoke(): Promise<any | null>;
 
@@ -231,6 +231,7 @@ export class UnityChatService {
         list(params?: any): Promise<any>;
         create(data: any): Promise<any>;
         update(data: any): Promise<any>;
+        delete(id: number): Promise<any>;
         getSelectRules(): Promise<any>;
     };
     contacts: {
@@ -266,30 +267,61 @@ export class UnityChatService {
         list(): Promise<any>;
         create(data: any): Promise<any>;
         getLogs(): Promise<any>;
+        testChannel(data: { session_id: number; channel_jid: string }): Promise<any>;
         generatePreview(data: any): Promise<any>;
     };
     calendars: {
         list(): Promise<any>;
         create(data: any): Promise<any>;
+        get(id: number | string): Promise<any>;
+        update(id: number | string, data: any): Promise<any>;
+        delete(id: number | string): Promise<any>;
     };
     schedules: {
         list(params?: any): Promise<any>;
         create(data: any): Promise<any>;
+        get(id: number | string): Promise<any>;
+        update(id: number | string, data: any): Promise<any>;
+        delete(id: number | string): Promise<any>;
     };
     serviceDesk: {
         getDashboard(): Promise<any>;
         getTickets(params?: any): Promise<any>;
+        getTicket(id: number | string): Promise<any>;
+        getContactHistory(contactId: number | string): Promise<any>;
         assignTicket(id: number | string, data?: any): Promise<any>;
         transferTicket(id: number | string, data: any): Promise<any>;
         closeTicket(id: number | string, data?: any): Promise<any>;
         reopenTicket(id: number | string): Promise<any>;
     };
+    support: {
+        getStats(params?: any): Promise<any>;
+        listTickets(params?: any): Promise<any>;
+        createTicket(data: any): Promise<any>;
+        getTicket(id: number | string): Promise<any>;
+        updateTicket(id: number | string, data: any): Promise<any>;
+        addTicketMessage(id: number | string, data: any): Promise<any>;
+    };
     billing: {
         getSummary(): Promise<any>;
         getPlans(): Promise<any>;
+        createPlan(data: any): Promise<any>;
+        updatePlan(id: number | string, data: any): Promise<any>;
+        deletePlan(id: number | string): Promise<any>;
         getInvoices(): Promise<any>;
+        createInvoice(data: any): Promise<any>;
+        updateInvoice(id: number | string, data: any): Promise<any>;
+        deleteInvoice(id: number | string): Promise<any>;
+        sendInvoice(id: number | string): Promise<any>;
         getPublicInvoice(uuid: string): Promise<any>;
         checkout(data: any): Promise<any>;
+        getSettings(): Promise<any>;
+        updateSettings(data: any): Promise<any>;
+        getDiscounts(): Promise<any>;
+        createDiscount(data: any): Promise<any>;
+        updateDiscount(id: number | string, data: any): Promise<any>;
+        deleteDiscount(id: number | string): Promise<any>;
+        triggerCycle(): Promise<any>;
     };
     webhooks: {
         list(): Promise<any>;
@@ -308,6 +340,7 @@ export class UnityChatService {
     admin: {
         getStats(): Promise<any>;
         getLogs(): Promise<any>;
+        analyzeAi(data?: { timeframe?: string; focus?: string }): Promise<any>;
         getModules(): Promise<any>;
     };
 }
@@ -358,4 +391,6 @@ export class UnityChatSession {
     getNewsletters(newsletterId?: string): Promise<any>;
     getMe(): Promise<any>;
     getMessages(options?: GetMessagesOptions): Promise<any>;
+    reload(): Promise<any>;
+    getManagementStatus(): Promise<any>;
 }

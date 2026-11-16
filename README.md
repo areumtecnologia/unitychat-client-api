@@ -278,8 +278,8 @@ await unityChatService.forgotPassword('operador@empresa.com');
 await unityChatService.resetPassword({ token: 'reset_token', newPassword: 'nova_senha_forte' });
 
 // Registro e ativação de nova conta
-await unityChatService.register({ name: 'João', email: 'joao@empresa.com', password: '123', company: 'Minha Empresa' });
-await unityChatService.activateAccount('activation_token');
+await unityChatService.register({ name: 'João', email: 'joao@empresa.com', phone: '5511999999999', website: 'https://empresa.com' });
+await unityChatService.activateAccount('CHAVE_DE_ATIVACAO_RECEBIDA_POR_EMAIL');
 ```
 
 ### 2. Contatos (CRM)
@@ -312,18 +312,24 @@ await unityChatService.bulkCampaigns.create({
 });
 ```
 
-### 4. Central de Atendimento (Service Desk)
+### 4. Central de Atendimento & Suporte (Service Desk & Help Desk)
 ```javascript
-// Dashboard de atendimento em tempo real
+// Service Desk: Dashboard em tempo real e filas de triagem omnichannel
 const dashboard = await unityChatService.serviceDesk.getDashboard();
-
-// Listar tickets abertos
 const tickets = await unityChatService.serviceDesk.getTickets({ status: TicketStatus.OPEN });
-
-// Atribuir, transferir ou encerrar ticket
 await unityChatService.serviceDesk.assignTicket(101, { user_id: 5 });
 await unityChatService.serviceDesk.transferTicket(101, { department_id: 2 });
 await unityChatService.serviceDesk.closeTicket(101, { resolution: 'RESOLVED', rating: 5 });
+
+// Help Desk: Tickets de suporte interno da plataforma
+const stats = await unityChatService.support.getStats();
+const myTickets = await unityChatService.support.listTickets();
+const ticket = await unityChatService.support.createTicket({
+    subject: 'Dúvida na integração',
+    priority: 'high',
+    description: 'Como configurar webhook HMAC?',
+    category: 'integrations'
+});
 ```
 
 ### 5. Faturamento & Assinaturas (Billing)
@@ -331,14 +337,29 @@ await unityChatService.serviceDesk.closeTicket(101, { resolution: 'RESOLVED', ra
 // Resumo do plano e consumo
 const summary = await unityChatService.billing.getSummary();
 
-// Faturas emitidas
+// Faturas emitidas e envio por WhatsApp/E-mail
 const faturas = await unityChatService.billing.getInvoices();
+await unityChatService.billing.sendInvoice(10); // Dispara cobrança com código PIX copia-e-cola
 
 // Gerar sessão de checkout para pagamento via PIX ou Cartão
 const checkout = await unityChatService.billing.checkout({ plan_id: 2, payment_method: 'pix' });
+
+// Configurações e cupons de desconto
+const settings = await unityChatService.billing.getSettings();
+const discounts = await unityChatService.billing.getDiscounts();
 ```
 
-### 6. Webhooks
+### 6. Auditoria com Inteligência Artificial (Admin)
+```javascript
+// Análise preditiva e detecção de anomalias com Google Gemini GenAI
+const analise = await unityChatService.admin.analyzeAi({
+    timeframe: '24h',
+    focus: 'errors'
+});
+console.log('Diagnóstico IA:', analise.summary);
+```
+
+### 7. Webhooks
 ```javascript
 // Cadastrar webhook para receber eventos
 await unityChatService.webhooks.create({

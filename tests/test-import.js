@@ -108,7 +108,7 @@ const service = new UnityChatService('fake-key');
 const requiredSubmodules = [
     'accounts', 'users', 'apiKeys', 'roles', 'contacts', 'omnichannel',
     'messageTemplates', 'bulkCampaigns', 'automations', 'smartCommunities',
-    'calendars', 'schedules', 'serviceDesk', 'billing', 'webhooks', 'media',
+    'calendars', 'schedules', 'serviceDesk', 'support', 'billing', 'webhooks', 'media',
     'locations', 'admin'
 ];
 
@@ -125,7 +125,7 @@ const requiredSessionMethods = [
     'getStatus', 'getQRcode', 'sendMessage', 'sendText', 'sendLink', 'sendLocation',
     'sendPoll', 'sendRaw', 'sendFiles', 'sendImage', 'sendVideo', 'sendAudio',
     'sendDocument', 'getConversations', 'verifyNumber', 'isOnWhatsApp', 'getGroups',
-    'getNewsletters', 'getMe', 'getMessages'
+    'getNewsletters', 'getMe', 'getMessages', 'reload', 'getManagementStatus'
 ];
 
 for (const m of requiredSessionMethods) {

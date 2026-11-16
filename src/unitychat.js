@@ -190,10 +190,15 @@ class UnityChatService {
         }
     }
 
-    async activateAccount(token) {
+    async activateAccount(keyOrToken) {
         try {
-            const { data } = await this._request('post', '/register/account-activation', {
-                data: { token }
+            const key = (keyOrToken && typeof keyOrToken === 'object')
+                ? (keyOrToken.key || keyOrToken.token)
+                : keyOrToken;
+
+            const { data } = await this._request('get', '/register/account-activation', {
+                params: { key },
+                validateStatus: (status) => status < 400 || status === 302
             });
             return data;
         } catch (e) {
@@ -331,6 +336,7 @@ class UnityChatService {
             list: async (params) => (await this._request('get', '/accounts/roles', { params })).data,
             create: async (data) => (await this._request('post', '/accounts/roles', { data })).data,
             update: async (data) => (await this._request('put', '/accounts/roles', { data })).data,
+            delete: async (id) => (await this._request('delete', '/accounts/roles', { data: { id } })).data,
             getSelectRules: async () => (await this._request('get', '/accounts/roles/permissions/select-rules')).data
         };
 
@@ -378,37 +384,69 @@ class UnityChatService {
             list: async () => (await this._request('get', '/accounts/smart-communities')).data,
             create: async (data) => (await this._request('post', '/accounts/smart-communities', { data })).data,
             getLogs: async () => (await this._request('get', '/accounts/smart-communities/logs')).data,
+            testChannel: async (data) => (await this._request('post', '/accounts/smart-communities/test-channel', { data })).data,
             generatePreview: async (data) => (await this._request('post', '/accounts/smart-communities/generate-preview', { data })).data
         };
 
         // 13. Agendamentos & Calendários
         this.calendars = {
             list: async () => (await this._request('get', '/accounts/calendars')).data,
-            create: async (data) => (await this._request('post', '/accounts/calendars', { data })).data
+            create: async (data) => (await this._request('post', '/accounts/calendars', { data })).data,
+            get: async (id) => (await this._request('get', `/accounts/calendars/${id}`)).data,
+            update: async (id, data) => (await this._request('put', `/accounts/calendars/${id}`, { data })).data,
+            delete: async (id) => (await this._request('delete', `/accounts/calendars/${id}`)).data
         };
 
         this.schedules = {
             list: async (params) => (await this._request('get', '/accounts/schedules', { params })).data,
-            create: async (data) => (await this._request('post', '/accounts/schedules', { data })).data
+            create: async (data) => (await this._request('post', '/accounts/schedules', { data })).data,
+            get: async (id) => (await this._request('get', `/accounts/schedules/${id}`)).data,
+            update: async (id, data) => (await this._request('put', `/accounts/schedules/${id}`, { data })).data,
+            delete: async (id) => (await this._request('delete', `/accounts/schedules/${id}`)).data
         };
 
-        // 14. Central de Atendimento (Service Desk)
+        // 14. Central de Atendimento & Suporte (Service Desk & Help Desk)
         this.serviceDesk = {
             getDashboard: async () => (await this._request('get', '/support/dashboard')).data,
             getTickets: async (params) => (await this._request('get', '/accounts/service-desk/tickets', { params })).data,
+            getTicket: async (id) => (await this._request('get', `/accounts/service-desk/tickets/${id}`)).data,
+            getContactHistory: async (contactId) => (await this._request('get', `/accounts/service-desk/tickets/history/${contactId}`)).data,
             assignTicket: async (id, data) => (await this._request('post', `/accounts/service-desk/tickets/${id}/assign`, { data })).data,
             transferTicket: async (id, data) => (await this._request('post', `/accounts/service-desk/tickets/${id}/transfer`, { data })).data,
             closeTicket: async (id, data) => (await this._request('post', `/accounts/service-desk/tickets/${id}/close`, { data })).data,
             reopenTicket: async (id) => (await this._request('post', `/accounts/service-desk/tickets/${id}/reopen`)).data
         };
 
+        this.support = {
+            getStats: async (params) => (await this._request('get', '/support/stats', { params })).data,
+            listTickets: async (params) => (await this._request('get', '/support/tickets', { params })).data,
+            createTicket: async (data) => (await this._request('post', '/support/tickets', { data })).data,
+            getTicket: async (id) => (await this._request('get', `/support/tickets/${id}`)).data,
+            updateTicket: async (id, data) => (await this._request('put', `/support/tickets/${id}`, { data })).data,
+            addTicketMessage: async (id, data) => (await this._request('post', `/support/tickets/${id}/messages`, { data })).data
+        };
+
         // 15. Faturamento & Assinaturas (Billing)
         this.billing = {
             getSummary: async () => (await this._request('get', '/billing/summary')).data,
             getPlans: async () => (await this._request('get', '/billing/plans')).data,
+            createPlan: async (data) => (await this._request('post', '/billing/plans', { data })).data,
+            updatePlan: async (id, data) => (await this._request('put', `/billing/plans/${id}`, { data })).data,
+            deletePlan: async (id) => (await this._request('delete', `/billing/plans/${id}`)).data,
             getInvoices: async () => (await this._request('get', '/billing/invoices')).data,
+            createInvoice: async (data) => (await this._request('post', '/billing/invoices', { data })).data,
+            updateInvoice: async (id, data) => (await this._request('put', `/billing/invoices/${id}`, { data })).data,
+            deleteInvoice: async (id) => (await this._request('delete', `/billing/invoices/${id}`)).data,
+            sendInvoice: async (id) => (await this._request('post', `/billing/invoices/${id}/send`)).data,
             getPublicInvoice: async (uuid) => (await this._request('get', `/billing/public/${uuid}`)).data,
-            checkout: async (data) => (await this._request('post', '/billing/checkout', { data })).data
+            checkout: async (data) => (await this._request('post', '/billing/checkout', { data })).data,
+            getSettings: async () => (await this._request('get', '/billing/settings')).data,
+            updateSettings: async (data) => (await this._request('put', '/billing/settings', { data })).data,
+            getDiscounts: async () => (await this._request('get', '/billing/discounts')).data,
+            createDiscount: async (data) => (await this._request('post', '/billing/discounts', { data })).data,
+            updateDiscount: async (id, data) => (await this._request('put', `/billing/discounts/${id}`, { data })).data,
+            deleteDiscount: async (id) => (await this._request('delete', `/billing/discounts/${id}`)).data,
+            triggerCycle: async () => (await this._request('post', '/billing/trigger-cycle')).data
         };
 
         // 16. Webhooks
@@ -431,10 +469,11 @@ class UnityChatService {
             getCities: async (stateId) => (await this._request('get', `/locations/cities/${stateId}`)).data
         };
 
-        // 19. Administração & Auditoria
+        // 19. Administração & Auditoria Inteligente
         this.admin = {
             getStats: async () => (await this._request('get', '/admin/stats')).data,
             getLogs: async () => (await this._request('get', '/admin/logs')).data,
+            analyzeAi: async (data) => (await this._request('post', '/admin/ai-analysis', { data })).data,
             getModules: async () => (await this._request('get', '/system/modules')).data
         };
     }
@@ -1010,6 +1049,42 @@ class UnityChatSession {
                     chat_id: options.chatId || options.chat_id,
                     limit: options.limit
                 },
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Dispara o re-bootstrap assíncrono das sessões WhatsApp em background.
+     * Rota: GET /whatsapp/management/reload
+     */
+    async reload() {
+        try {
+            const { data } = await axios.get(`${this.baseURL}/whatsapp/management/reload`, {
+                headers: {
+                    Authorization: `Bearer ${this.token}`
+                },
+                timeout: this.timeout
+            });
+            return data;
+        } catch (exc) {
+            return this._handleError(exc);
+        }
+    }
+
+    /**
+     * Consulta as estatísticas e status atual do processo de bootstrap.
+     * Rota: GET /whatsapp/management/status
+     */
+    async getManagementStatus() {
+        try {
+            const { data } = await axios.get(`${this.baseURL}/whatsapp/management/status`, {
                 headers: {
                     Authorization: `Bearer ${this.token}`
                 },
